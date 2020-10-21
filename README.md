@@ -146,3 +146,8 @@ If you find our work useful in your research, please consider citing:
 Some other related work on non-rigid tracking by our group:
 * [Bozic et al. - DeepDeform: Learning Non-rigid RGB-D Reconstruction with Semi-supervised Data (2020)](https://niessnerlab.org/projects/bozic2020deepdeform.html)
 * [Li et al. - Learning to Optimize Non-Rigid Tracking (2020)](https://niessnerlab.org/projects/li2020learning.html)
+
+
+## License
+
+The code from this repository is released under the MIT license, except where otherwise stated (i.e., `pwcnet.py`, `Eigen`).
