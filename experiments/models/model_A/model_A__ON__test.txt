@@ -1,0 +1,9 @@
+
+Evaluation results:
+
+
+Model: model_A
+Split: test
+
+Graph Error 3D (mm)                      30.89792276991369
+EPE 3D (mm)                              26.004892088318034
