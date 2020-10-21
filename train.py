@@ -110,7 +110,7 @@ if __name__ == "__main__":
         assert os.path.isfile(saved_model), "\nModel {} does not exist. Please train a model from scratch or specify a valid path to a model.".format(saved_model)
         pretrained_dict = torch.load(saved_model)
         
-        if "network-chairs-things.pytorch" in saved_model:
+        if "chairs_things" in saved_model:
             model.flow_net.load_state_dict(pretrained_dict)
         else:
             if opt.model_module_to_load == "full_model":

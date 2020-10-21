@@ -58,7 +58,7 @@ def main():
     # Construct model
     model = DeformNet().cuda()
 
-    if "network-chairs-things.pytorch" in saved_model:
+    if "chairs_things" in saved_model:
         model.flow_net.load_state_dict(pretrained_dict)
     else:
         if opt.model_module_to_load == "full_model":

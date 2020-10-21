@@ -1,6 +1,6 @@
 # Neural Non-Rigid Tracking (NeurIPS 2020)
 
-### [Project Page](https://www.niessnerlab.org/projects/bozic2020nnrt.html) | [Paper](https://arxiv.org/abs/2006.13240) | [Video](https://www.youtube.com/watch?time_continue=1&v=nqYaxM6Rj8I&feature=emb_logo) | [Data (TODO)](#)
+### [Project Page](https://www.niessnerlab.org/projects/bozic2020nnrt.html) | [Paper](https://arxiv.org/abs/2006.13240) | [Video](https://www.youtube.com/watch?time_continue=1&v=nqYaxM6Rj8I&feature=emb_logo) | [Data](https://github.com/AljazBozic/DeepDeform)
 
 <p align="center">
   <img width="100%" src="media/teaser.gif"/>
@@ -68,12 +68,30 @@ Within the [Open3D](http://www.open3d.org/) viewer, you can view the following b
 
 ## Data
 
-bla bla
+The raw image data and flow alignments can be obtained at the [DeepDeform](https://github.com/AljazBozic/DeepDeform) repository.
 
+The additionally generated graph data can be downloaded using this [link](http://kaldir.vc.in.tum.de/download/deepdeform_graph_v1.7z).
 
+Both archives are supposed to be extracted in the same directory.
 
 ## Train
 
+You can run 
+
+```
+./run_train.sh
+```
+
+to train a model. Adapt `options.py` with the path to the dataset. You can initialize with a pretrained model by setting the `use_pretrained_model` flag. 
+
+To reproduce our complete approach, training proceeds in four stages. To this end, for each stage you will have to set the following variables in `options.py`:
+
+1. `mode = "0_flow"` and `model_name = "chairs_things"`.
+2. `mode = "1_solver"` and `model_name = "<best checkpoint from step 1>"`.
+3. `mode = "2_mask"` and `model_name = "<best checkpoint from step 2>"`.
+4. `mode = "3_refine"` and `model_name = "<best checkpoint from step 3>"`.
+
+Each stage should be run for around 30k iterations, which corresponds to about 10 epochs.
 
 
 ## Evaluate
@@ -96,10 +114,13 @@ Next, you can run
 
 to compute the `Graph Error 3D` (graph node deformation) and `EPE 3D` (dense deformation).
 
+Or you can also run 
 
+```
+./run_generate_and_evaluate.sh
+```
 
-## Submit to the benchmark
-
+to do both sequencially.
 
 
 ## Known Issues
