@@ -31,7 +31,7 @@ def Backward(x, flow):
 
     x = torch.cat([ x, backward_partial[str(flow.size())] ], 1)
 
-    output = torch.nn.functional.grid_sample(input=x, grid=grid, mode='bilinear', padding_mode='zeros', align_corners=True)
+    output = torch.nn.functional.grid_sample(input=x, grid=grid, mode='bilinear', padding_mode='zeros', align_corners=False)
     
     mask = output[:, -1:, :, :]
     mask[mask > 0.999] = 1.0; mask[mask < 1.0] = 0.0
