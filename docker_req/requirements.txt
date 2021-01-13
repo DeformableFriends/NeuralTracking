@@ -1,2 +1,0 @@
-freetype-py
-open3d
