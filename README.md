@@ -43,7 +43,8 @@ cd ..
 
 ### Specify Repository Path To Mount 
 
-After cloning the repo, 'cd' into it and modify `start_nnrt.sh` with your repository absolute path for variable `LOCAL_SRC_DIR` 
+After cloning the repo, 'cd' into it and modify `start_nnrt.sh` with your repository absolute path for variable `LOCAL_SRC_DIR`.
+
 For Example, In `start_nnrt.sh`
 ``` 
 # Varibles to edit - NNRT Repo absolute path
