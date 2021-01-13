@@ -19,7 +19,7 @@ Under this formulation, correspondence confidences can be learned via self-super
 
 
 ## Installation
-You can Either choose to setup your enviromment locally or use a docker.
+You can either choose to setup your enviromment locally or use a docker with all dependencies.
 ### Setup Locally
 #### Set up the conda enviromment
 
