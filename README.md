@@ -39,7 +39,23 @@ python setup.py install
 cd ..
 ```
 
+## Use Docker
 
+### Specify Repository Path To Mount 
+
+After cloning the repo, 'cd' into it and modify `start_nnrt.sh` with your repository absolute path for variable `LOCAL_SRC_DIR` 
+For Example, In `start_nnrt.sh`
+``` 
+# Varibles to edit - NNRT Repo absolute path
+LOCAL_SRC_DIR=/home/user_name/Repositories/NeuralTracking
+```
+### Run Docker
+Run the following command:
+
+```
+sh start_nnrt.sh
+```
+The repository folder will be mounted in `/workspace/local_station/`
 
 ## I just want to try it on two frames!
 
