@@ -50,6 +50,8 @@ WORKDIR /workspace/NNRT/csrc
 RUN python setup.py install
 
 RUN mkdir /workspace/local_station
+RUN pip install tensorboardX
+RUN pip install flowiz -U
 
 EXPOSE 8097
 EXPOSE 6006
