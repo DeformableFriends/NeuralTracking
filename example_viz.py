@@ -39,6 +39,25 @@ def main():
         "cy": 236.417
     }
 
+    # Train set example
+    # Important: You need to generate graph data using create_graph_data.py first.
+
+    # split = "train"
+    # seq_id = 258
+
+    # src_id = 0 # source frame
+    # tgt_id = 110 # target frame
+
+    # srt_tgt_str = "generated_shirt_000000_000110_geodesic_0.05"
+
+    # # Make sure to use the intrinsics corresponding to the seq_id above!!  
+    # intrinsics = {
+    #     "fx": 575.548,
+    #     "fy": 577.46,
+    #     "cx": 323.172,
+    #     "cy": 236.417
+    # }
+
     # Some params for coloring the predicted correspondence confidences
     weight_thr = 0.3
     weight_scale = 1

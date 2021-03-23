@@ -92,6 +92,11 @@ The additionally generated graph data can be downloaded using this [link](http:/
 
 Both archives are supposed to be extracted in the same directory.
 
+If you want to generate data on your own, also for new sequence, you can specify frame pair and run:
+```
+python create_graph_data.py
+```
+
 ## Train
 
 You can run 

@@ -61,6 +61,11 @@ namespace image_proc {
         const py::array_t<float>& pointImage, const py::array_t<int>& colorImage, float maxTriangleEdgeDistance, 
         py::array_t<float>& vertexPositions, py::array_t<int>& vertexColors, py::array_t<int>& faceIndices
     );
+
+    void compute_mesh_from_depth_and_flow(
+        const py::array_t<float>& pointImage, const py::array_t<float>& flowImage, float maxTriangleEdgeDistance, 
+        py::array_t<float>& vertexPositions, py::array_t<float>& vertexFlows, py::array_t<int>& vertexPixels, py::array_t<int>& faceIndices
+    );
 	
     void filter_depth(py::array_t<unsigned short>& in, py::array_t<unsigned short>& out, int radius);
 
