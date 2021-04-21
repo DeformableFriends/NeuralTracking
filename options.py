@@ -3,8 +3,7 @@ import os
 #####################################################################################################################
 # DATA OPTIONS
 #####################################################################################################################
-# dataset_base_dir    = "/cluster/lothlann/data/nonrigid/public/"
-dataset_base_dir    = "/mnt/slurm_cluster/lothlann/data/nonrigid/hidden/"
+dataset_base_dir    = "/cluster_HDD/lothlann/nonrigid/public/"
 workspace           = "."
 experiments_dir     = os.path.join(workspace, "experiments")
 
@@ -23,11 +22,11 @@ num_samples_eval = 700
 # - In train.py, this info is only used if use_pretrained_model=True
 # - In generate.py, evaluate.py or example_viz.py, it is used regardless of the value of use_pretrained_model
 
-use_pretrained_model = False # used only in train.py
+use_pretrained_model = True # used only in train.py
 
-model_module_to_load = "full_model"    # A: "only_flow_net", B: "full_model"
-model_name           = "model_A"       # your model's name
-model_iteration      = 0               # iteration number of the model you want to load
+model_module_to_load = "full_model" # A: "only_flow_net", B: "full_model"
+model_name           = "model_A"    # your model's name, e.g., "model_A", "chairs_things"
+model_iteration      = 0            # iteration number of the model you want to load
 
 saved_model = os.path.join(experiments_dir, "models", model_name, f"{model_name}_{model_iteration}.pt")
 
@@ -82,10 +81,6 @@ def print_hyperparams():
     print("\tgn_max_matches_train         ", gn_max_matches_train)
     print("\tgn_max_matches_eval          ", gn_max_matches_eval)
     print("\tgn_depth_sampling_mode       ", gn_depth_sampling_mode)
-    print("\tgn_num_iter                  ", gn_num_iter)
-    print("\tgn_data                      ", gn_data)
-    print("\tgn_arap                      ", gn_arap)
-    print("\tgn_lm_factor                 ", gn_lm_factor)
     print("\tgn_use_edge_weighting        ", gn_use_edge_weighting)
     print("\tgn_remove_clusters           ", gn_remove_clusters_with_few_matches)
     print()
