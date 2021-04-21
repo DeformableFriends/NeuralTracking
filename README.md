@@ -19,8 +19,9 @@ Under this formulation, correspondence confidences can be learned via self-super
 
 
 ## Installation
-
-### Set up the conda enviromment
+You can either choose to setup your enviromment locally or use a docker with all dependencies.
+### Setup Locally
+#### Set up the conda enviromment
 
 After cloning this repo, `cd` into it and create a conda environment with (hopefully) all required packages:
 
@@ -28,7 +29,7 @@ After cloning this repo, `cd` into it and create a conda environment with (hopef
 conda env create --file resources/env.yml
 ```
 
-### Install some C++ extensions ([csrc](csrc))
+#### Install some C++ extensions ([csrc](csrc))
 
 Then, activate the environment and install some c++ dependencies:
 
@@ -39,7 +40,24 @@ python setup.py install
 cd ..
 ```
 
+### Use Docker
 
+#### Specify Repository Path To Mount 
+
+After cloning the repo, 'cd' into it and modify `start_nnrt.sh` with your repository absolute path for variable `LOCAL_SRC_DIR`.
+
+For Example, In `start_nnrt.sh`
+``` 
+# Varibles to edit - NNRT Repo absolute path
+LOCAL_SRC_DIR=/home/user_name/Repositories/NeuralTracking
+```
+#### Run Docker
+Run the following command:
+
+```
+sh start_nnrt.sh
+```
+The repository folder will be mounted in `/workspace/local_station/`
 
 ## I just want to try it on two frames!
 
@@ -73,6 +91,11 @@ The raw image data and flow alignments can be obtained at the [DeepDeform](https
 The additionally generated graph data can be downloaded using this [link](http://kaldir.vc.in.tum.de/download/deepdeform_graph_v1.7z).
 
 Both archives are supposed to be extracted in the same directory.
+
+If you want to generate data on your own, also for a new sequence, you can specify frame pair and run:
+```
+python create_graph_data.py
+```
 
 ## Train
 

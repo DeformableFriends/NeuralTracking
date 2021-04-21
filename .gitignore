@@ -129,3 +129,15 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Output directory
+/output
+
+# Generated train data
+/example_data/train/seq258/graph_clusters
+/example_data/train/seq258/graph_edges
+/example_data/train/seq258/graph_edges_weights
+/example_data/train/seq258/graph_nodes
+/example_data/train/seq258/graph_node_deformations
+/example_data/train/seq258/pixel_anchors
+/example_data/train/seq258/pixel_weights

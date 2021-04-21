@@ -78,7 +78,9 @@ namespace graph_proc {
     int sample_nodes(
         const py::array_t<float>& vertexPositions, const py::array_t<bool>& nonErodedVertices,
         py::array_t<float>& nodePositions, py::array_t<int>& nodeIndices, 
-        float nodeCoverage, const bool useOnlyNonErodedIndices=true
+        float nodeCoverage, 
+        const bool useOnlyNonErodedIndices=true, 
+        const bool randomShuffle=true
     ) {
         // assert(vertexPositions.ndim() == 2);
 
@@ -97,8 +99,10 @@ namespace graph_proc {
         std::vector<int> shuffledVertices(nVertices);
         std::iota(std::begin(shuffledVertices), std::end(shuffledVertices), 0);
 
-        std::default_random_engine re{std::random_device{}()};
-        std::shuffle(std::begin(shuffledVertices), std::end(shuffledVertices), re);
+        if (randomShuffle) {
+            std::default_random_engine re{std::random_device{}()};
+            std::shuffle(std::begin(shuffledVertices), std::end(shuffledVertices), re);
+        }
 
         std::vector<Eigen::Vector3f> nodePositionsVec;
         for (int vertexIdx : shuffledVertices) {
@@ -139,15 +143,32 @@ namespace graph_proc {
         }
     };
 
-    py::array_t<int> compute_edges_geodesic(
+    inline float compute_anchor_weight(const Eigen::Vector3f& pointPosition, const Eigen::Vector3f& nodePosition, float nodeCoverage) {
+        return std::exp(-(nodePosition - pointPosition).squaredNorm() / (2.f * nodeCoverage * nodeCoverage));
+    }
+
+    inline float compute_anchor_weight(float dist, float nodeCoverage) {
+        return std::exp(- (dist * dist) / (2.f * nodeCoverage * nodeCoverage));
+    }
+
+    void compute_edges_geodesic(
 		const py::array_t<float>& vertexPositions,
+		const py::array_t<bool>& validVertices, 
 		const py::array_t<int>& faceIndices, 
 		const py::array_t<int>& nodeIndices, 
-		int nMaxNeighbors, float maxInfluence
+		const int nMaxNeighbors, const float nodeCoverage,
+        py::array_t<int>& graphEdges,
+        py::array_t<float>& graphEdgesWeights,
+        py::array_t<float>& graphEdgesDistances,
+        py::array_t<float>& nodeToVertexDistances,
+        const bool allow_only_valid_vertices,
+        const bool enforce_total_num_neighbors
 	) {
 		int nVertices = vertexPositions.shape(0);
 		int nFaces = faceIndices.shape(0);
         int nNodes = nodeIndices.shape(0);
+
+        float maxInfluence = 2.f * nodeCoverage;
 
         // Preprocess vertex neighbors.
 		vector<std::set<int>> vertexNeighbors(nVertices);
@@ -174,21 +195,10 @@ namespace graph_proc {
 			}
 		}
 
-        // Compute node-vertex distances (not necessary).
-        // py::array_t<float> nodeToVertexDistances = py::array_t<float>({ nNodes, nVertices });
-
-		// for (int nodeId = 0; nodeId < nNodes; nodeId++) {
-		// 	for (int vertexIdx = 0; vertexIdx < nVertices; vertexIdx++) {
-		// 		*nodeToVertexDistances.mutable_data(nodeId, vertexIdx) = -1.f;
-		// 	}
-		// }
-
-		// Construct geodesic edges.
-        py::array_t<int> graphEdges = py::array_t<int>({ nNodes, nMaxNeighbors });
-
         // #pragma omp parallel for
 		for (int nodeId = 0; nodeId < nNodes; nodeId++) {
-			std::priority_queue<
+			// vertex queue
+            std::priority_queue<
 				std::pair<int, float>,
 				vector<std::pair<int, float>>,
 				CustomCompare
@@ -202,7 +212,9 @@ namespace graph_proc {
 			nextVerticesWithIds.push(std::make_pair(nodeVertexIdx, 0.f));
 			
 			// Traverse all neighbors in the monotonically increasing order.
-            vector<int> neighborNodeIds;
+            vector<int>   neighborNodeIds;
+            vector<float> neighborNodeWeights;
+            vector<float> neighborNodeDistances;
 			while (!nextVerticesWithIds.empty()) {
 				auto nextVertex = nextVerticesWithIds.top();
 				nextVerticesWithIds.pop();
@@ -213,68 +225,77 @@ namespace graph_proc {
 				// We skip the vertex, if it was already visited before.
 				if (visitedVertices.find(nextVertexIdx) != visitedVertices.end()) continue;
 
+                if (allow_only_valid_vertices && !*validVertices.data(nextVertexIdx)) {
+                    std::cout << "compute_edges_geodesic:: ufff... we shouldn't be checking out this vertex" << std::endl;
+                    exit(0);
+                }
+
 				// We check if the vertex is a node.
 				int nextNodeId = mapVertexToNode[nextVertexIdx];
 				if (nextNodeId >= 0 && nextNodeId != nodeId) {
                     neighborNodeIds.push_back(nextNodeId);
+                    neighborNodeWeights.push_back(compute_anchor_weight(nextVertexDist, nodeCoverage));
+                    neighborNodeDistances.push_back(nextVertexDist);
                     if (neighborNodeIds.size() >= nMaxNeighbors) break;
 				}
 
 				// Note down the node-vertex distance.
-				// *nodeToVertexDistances.mutable_data(nodeId, nextVertexIdx) = nextVertexDist;
+				*nodeToVertexDistances.mutable_data(nodeId, nextVertexIdx) = nextVertexDist;
 
 				// We visit the vertex, and check all his neighbors.
-				// We add only vertices under a certain distance.
+				// We add only valid vertices under a certain distance
 				visitedVertices.insert(nextVertexIdx);
 				Eigen::Vector3f nextVertexPos(*vertexPositions.data(nextVertexIdx, 0), *vertexPositions.data(nextVertexIdx, 1), *vertexPositions.data(nextVertexIdx, 2));
 
 				const auto& nextNeighbors = vertexNeighbors[nextVertexIdx];
 				for (int neighborIdx : nextNeighbors) {
-					Eigen::Vector3f  neighborVertexPos(*vertexPositions.data(neighborIdx, 0), *vertexPositions.data(neighborIdx, 1), *vertexPositions.data(neighborIdx, 2));
-					float dist = nextVertexDist + (nextVertexPos - neighborVertexPos).norm();
 
-					if (dist <= maxInfluence) {
+                    bool is_valid_vertex = *validVertices.data(neighborIdx); 
+                    if (allow_only_valid_vertices && !is_valid_vertex) {
+                        continue;
+                    }
+
+					Eigen::Vector3f neighborVertexPos(*vertexPositions.data(neighborIdx, 0), *vertexPositions.data(neighborIdx, 1), *vertexPositions.data(neighborIdx, 2));
+					float dist = nextVertexDist + (nextVertexPos - neighborVertexPos).norm();
+                    
+                    if (enforce_total_num_neighbors) {
 						nextVerticesWithIds.push(std::make_pair(neighborIdx, dist));
-					}
+                    }
+					else {
+                        // std::cout << dist << " " << maxInfluence << std::endl;
+                        if (dist <= maxInfluence) {
+						    nextVerticesWithIds.push(std::make_pair(neighborIdx, dist));
+					    }
+                    } 
 				}
 			}
-
-            // If we don't get any geodesic neighbors, we take one nearest Euclidean neighbor,
-            // to have a constrained optimization system at non-rigid tracking.
-            if (neighborNodeIds.empty()) {
-                float nearestDistance2 = std::numeric_limits<float>::infinity();
-                float nearestNodeId = -1;
-
-                Eigen::Vector3f nodePos(*vertexPositions.data(nodeVertexIdx, 0), *vertexPositions.data(nodeVertexIdx, 1), *vertexPositions.data(nodeVertexIdx, 2));
-
-                for (int i = 0; i < nNodes; i++) {
-                    int vertexIdx = *nodeIndices.data(i);
-                    if (i != nodeId && vertexIdx >= 0) {
-                        Eigen::Vector3f neighborPos(*vertexPositions.data(vertexIdx, 0), *vertexPositions.data(vertexIdx, 1), *vertexPositions.data(vertexIdx, 2));
-
-                        float distance2 = (neighborPos - nodePos).squaredNorm();
-                        if (distance2 < nearestDistance2) {
-                            nearestDistance2 = distance2;
-                            nearestNodeId = i;
-                        }
-                    }
-		        }
-
-                if (nearestNodeId >= 0) neighborNodeIds.push_back(nearestNodeId);
-            }
 
             // Store the nearest neighbors.
             int nNeighbors = neighborNodeIds.size();
 
+            float weightSum = 0.f;
             for (int i = 0; i < nNeighbors; i++) {
                 *graphEdges.mutable_data(nodeId, i) = neighborNodeIds[i];
+                weightSum += neighborNodeWeights[i];
             }
-            for (int i = nNeighbors; i < nMaxNeighbors; i++) {
-                *graphEdges.mutable_data(nodeId, i) = -1;
+
+            // Normalize weights
+            if (weightSum > 0) {
+                for (int i = 0; i < nNeighbors; i++) {
+                    *graphEdgesWeights.mutable_data(nodeId, i) = neighborNodeWeights[i] / weightSum;
+                }
+            }
+            else if (nNeighbors > 0) {
+                for (int i = 0; i < nNeighbors; i++) {
+                    *graphEdgesWeights.mutable_data(nodeId, i) = neighborNodeWeights[i] / nNeighbors;
+                }
+            }
+
+            // Store edge distance.
+            for (int i = 0; i < nNeighbors; i++) {
+                *graphEdgesDistances.mutable_data(nodeId, i) = neighborNodeDistances[i];
             }
 		}
-
-        return graphEdges;
     }
 
     py::array_t<int> compute_edges_euclidean(const py::array_t<float>& nodePositions, int nMaxNeighbors) {
@@ -333,151 +354,254 @@ namespace graph_proc {
         return graphEdges;
     }
 
-    static inline float computeAnchorWeight(const Eigen::Vector3f& pointPosition, const Eigen::Vector3f& nodePosition, float nodeCoverage) {
-        return std::exp(-(nodePosition - pointPosition).squaredNorm() / (2.f * nodeCoverage * nodeCoverage));
-    }
+    inline int traverse_neighbors(const std::vector<std::set<int>>& node_neighbors, std::vector<int>& cluster_ids, int cluster_id, int node_id) {
+        if (cluster_ids[node_id] != -1) return 0;
+        
+        std::set<int> active_node_indices;
 
-    void compute_pixel_anchors_geodesic(
-        const py::array_t<float>& graphNodes, 
-        const py::array_t<int>& graphEdges,
-        const py::array_t<float>& pointImage,
-        int neighborhoodDepth,
-        float nodeCoverage,
-        py::array_t<int>& pixelAnchors, 
-        py::array_t<float>& pixelWeights
-    ) {
-        int numNodes = graphNodes.shape(0);
-        int numNeighbors = graphEdges.shape(1);
-        int width = pointImage.shape(2);
-        int height = pointImage.shape(1);
-        // int nChannels = pointImage.shape(0);
+        // Initialize with current node.
+        int cluster_size = 0;
+        active_node_indices.insert(node_id);
 
-        // Allocate graph node ids and corresponding skinning weights.
-        // Initialize with invalid anchors.
-        pixelAnchors.resize({ height, width, GRAPH_K }, false);
-        pixelWeights.resize({ height, width, GRAPH_K }, false);
+        // Process until we have no active nodes anymore.
+        while (!active_node_indices.empty()) {	
+            int active_node_id = *active_node_indices.begin();
+            active_node_indices.erase(active_node_indices.begin());
 
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                for (int k = 0; k < GRAPH_K; k++) {
-                    *pixelAnchors.mutable_data(y, x, k) = -1;
-                    *pixelWeights.mutable_data(y, x, k) = 0.f;
+            if (cluster_ids[active_node_id] == -1) {
+                cluster_ids[active_node_id] = cluster_id;
+                ++cluster_size;
+            }
+
+            // Look if we need to process any of the neighbors
+            for (const auto& n_idx : node_neighbors[active_node_id]) {
+                if (cluster_ids[n_idx] == -1) {	// If it doesn't have a cluster yet
+                    active_node_indices.insert(n_idx);
                 }
             }
         }
 
-        // Compute anchors for every pixel.
-        #pragma omp parallel for
+        return cluster_size;
+    }
+
+    void node_and_edge_clean_up(const py::array_t<int>& graph_edges, py::array_t<bool>& valid_nodes_mask) {
+        int num_nodes = graph_edges.shape(0);
+        int max_num_neighbors = graph_edges.shape(1);
+
+        std::list<int> removed_nodes;
+
+        while (true) {
+            int num_newly_removed_nodes = 0;
+
+            for (int node_id = 0; node_id < num_nodes; ++node_id) {
+
+                if (*valid_nodes_mask.data(node_id, 0) == false) {
+                    // if node has been already removed, continue
+                    continue;
+                }
+
+                int num_neighbors = 0;
+                for (int i = 0; i < max_num_neighbors; ++i) {
+
+                    int neighbor_id = *graph_edges.data(node_id, i);
+                    
+                    // if neighboring node is -1, break, since by design 'graph_edges' has
+                    // the shape [2, 3, 6, -1, -1, -1, -1, -1]
+                    if (neighbor_id == -1) {
+                        break;
+                    }
+
+                    // if neighboring node has been marked as invalid, continue
+                    if (std::find(removed_nodes.begin(), removed_nodes.end(), neighbor_id) != removed_nodes.end()) {
+                        continue;
+                    }
+
+                    ++num_neighbors;
+                }
+
+                if (num_neighbors <= 1) {
+                    // remove node
+                    *valid_nodes_mask.mutable_data(node_id, 0) = false;
+                    removed_nodes.emplace_back(node_id);
+                    // std::cout << "\tremoving node_id " << node_id << std::endl;
+                    ++num_newly_removed_nodes;
+                }
+            }
+
+            // std::cout << "num_newly_removed_nodes: " << num_newly_removed_nodes << std::endl;
+
+            if (num_newly_removed_nodes == 0) {
+                break;
+            }
+        }
+    }
+
+    std::vector<int> compute_clusters(
+        const py::array_t<int> graph_edges,
+        py::array_t<int> graph_clusters
+    ) {
+        int num_nodes = graph_edges.shape(0);
+        int max_num_neighbors = graph_edges.shape(1);
+
+        // convert graph_edges to a vector of sets
+        std::vector<std::set<int>> node_neighbors(num_nodes);
+
+        for (int node_id = 0; node_id < num_nodes; ++node_id) {
+            for (int neighbor_idx = 0; neighbor_idx < max_num_neighbors; ++neighbor_idx) {
+                
+                int neighbor_id = *graph_edges.data(node_id, neighbor_idx);
+                
+                if (neighbor_id == -1) {
+                    break;
+                }
+
+                node_neighbors[node_id].insert(neighbor_id);
+                node_neighbors[neighbor_id].insert(node_id);
+            }
+        }
+
+        std::vector<int> cluster_ids(num_nodes, -1);
+        std::vector<int> clusters_size;
+
+        int cluster_id = 0;
+        for (int node_id = 0; node_id < num_nodes; ++node_id) {
+            int cluster_size = traverse_neighbors(node_neighbors, cluster_ids, cluster_id, node_id);
+            if (cluster_size > 0) {
+                cluster_id++;
+                clusters_size.push_back(cluster_size);
+            }
+        }
+
+        for (int node_id = 0; node_id < num_nodes; ++node_id) {
+            *graph_clusters.mutable_data(node_id, 0) = cluster_ids[node_id];
+        }
+
+        return clusters_size;
+    }   
+
+    inline void compute_nearest_geodesic_nodes(
+        const py::array_t<float>&  node_to_vertex_distance, 
+        const py::array_t<int>& valid_nodes_mask,
+        const int vertex_id, 
+        std::vector<int>& nearest_geodesic_node_ids, 
+        std::vector<float>& dist_to_nearest_geodesic_nodes
+    ) {
+        int num_nodes = node_to_vertex_distance.shape(0);
+
+        std::map<int, float> node_map;
+
+        for (int n = 0; n < num_nodes; ++n) {
+
+            // discard node if it was marked as invalid (due to not having enough neighbors)
+            if (*valid_nodes_mask.data(n, 0) == false) {
+                continue;
+            }
+
+            float dist = *node_to_vertex_distance.data(n, vertex_id);
+
+            if (dist >= 0) {
+                node_map.emplace(n, dist);
+            }
+        }
+
+        // Sort the map by distance
+        // Declaring the type of Predicate that accepts 2 pairs and return a bool
+        typedef std::function<bool(std::pair<int, float>, std::pair<int, float>)> Comparator;
+ 
+        // Defining a lambda function to compare two pairs. It will compare two pairs using second field
+        Comparator comp_functor =
+            [](std::pair<int, float> node1 ,std::pair<int, float> node2) {
+                return node1.second < node2.second;
+            };
+
+        // Declaring a set that will store the pairs using above comparision logic
+        std::set<std::pair<int, float>, Comparator> node_set(
+            node_map.begin(), node_map.end(), comp_functor
+        );
+
+        for (auto n : node_set) {
+            nearest_geodesic_node_ids.push_back(n.first);
+            dist_to_nearest_geodesic_nodes.push_back(n.second);
+
+            if (nearest_geodesic_node_ids.size() == GRAPH_K) {
+                break;
+            }
+        }
+    }
+
+    void compute_pixel_anchors_geodesic(
+        const py::array_t<float> &node_to_vertex_distance, 
+        const py::array_t<int> &valid_nodes_mask, 
+        const py::array_t<float> &vertices,
+        const py::array_t<int> &vertex_pixels, 
+        py::array_t<int>& pixel_anchors, 
+        py::array_t<float>& pixel_weights,
+        const int width, const int height,
+        const float node_coverage
+    ) {
+        // Allocate graph node ids and corresponding skinning weights.
+        // Initialize with invalid anchors.
+        pixel_anchors.resize({ height, width, GRAPH_K }, false);
+        pixel_weights.resize({ height, width, GRAPH_K }, false);
+
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
-                // Query 3d pixel position.
-                Eigen::Vector3f pixelPos(*pointImage.data(0, y, x), *pointImage.data(1, y, x), *pointImage.data(2, y, x));
-                if (pixelPos.z() <= 0) continue;
-                
-                // Find nearest Euclidean graph node.
-                float nearestDist2 = std::numeric_limits<float>::infinity();
-                int nearestNodeId = -1;
-                for (int nodeId = 0; nodeId < numNodes; nodeId++) {
-                    Eigen::Vector3f nodePos(*graphNodes.data(nodeId, 0), *graphNodes.data(nodeId, 1), *graphNodes.data(nodeId, 2));
-                    float dist2 = (nodePos - pixelPos).squaredNorm();
-                    if (dist2 < nearestDist2) {
-                        nearestDist2 = dist2;
-                        nearestNodeId = nodeId;
-                    }
+                for (int k = 0; k < GRAPH_K; k++) {
+                    *pixel_anchors.mutable_data(y, x, k) = -1;
+                    *pixel_weights.mutable_data(y, x, k) = 0.f;
                 }
+            }
+        }
 
-                // Compute the geodesic neighbor candidates.
-                std::set<int> neighbors{ nearestNodeId };
-                std::set<int> newNeighbors = neighbors;
+        int num_vertices = vertices.shape(0);
 
-                for (int i = 0; i < neighborhoodDepth; i++) {
-                    // Get all neighbors of the new neighbors.
-                    std::set<int> currentNeighbors;
-                    for (auto neighborId : newNeighbors) {
-                        for (int k = 0; k < numNeighbors; k++) {
-                            int currentNeighborId = *graphEdges.data(neighborId, k);
-                            
-                            if (currentNeighborId >= 0) {
-                                currentNeighbors.insert(currentNeighborId);
-                            }
-                        }
-                    }
+        for (int vertex_id = 0; vertex_id < num_vertices; vertex_id++) {
+            // Get corresponding pixel location
+            int u = *vertex_pixels.data(vertex_id, 0);
+            int v = *vertex_pixels.data(vertex_id, 1);
 
-                    // Check the newly added neighbors (not present in the neighbors set).
-                    newNeighbors.clear();
-                    std::set_difference(
-                        currentNeighbors.begin(), currentNeighbors.end(),
-                        neighbors.begin(), neighbors.end(),
-                        std::inserter(newNeighbors, newNeighbors.begin())
-                    );
+            // Initialize some variables
+            std::vector<int> nearest_geodesic_node_ids;
+            std::vector<float> dist_to_nearest_geodesic_nodes;
+            std::vector<float> skinning_weights;
 
-                    // Insert the newly added neighbors.
-                    neighbors.insert(newNeighbors.begin(), newNeighbors.end());
-                }
+            nearest_geodesic_node_ids.reserve(GRAPH_K);
+            dist_to_nearest_geodesic_nodes.reserve(GRAPH_K);
+            skinning_weights.reserve(GRAPH_K);
 
-                // Keep only the k nearest geodesic neighbors.
-                std::list<std::pair<int, float>> nearestNodesWithSquaredDistances;
+            // Find closest geodesic nodes
+            compute_nearest_geodesic_nodes(
+                node_to_vertex_distance, valid_nodes_mask, vertex_id,
+                nearest_geodesic_node_ids, dist_to_nearest_geodesic_nodes
+            );
 
-                for (auto&& neighborId : neighbors) {
-                    Eigen::Vector3f nodePos(*graphNodes.data(neighborId, 0), *graphNodes.data(neighborId, 1), *graphNodes.data(neighborId, 2));
+            int num_anchors = nearest_geodesic_node_ids.size();
 
-                    float distance2 = (nodePos - pixelPos).squaredNorm();
-                    bool bInserted = false;
-                    for (auto it = nearestNodesWithSquaredDistances.begin(); it != nearestNodesWithSquaredDistances.end(); ++it) {
-                        // We insert the element at the first position where its distance is smaller than the other
-                        // element's distance, which enables us to always keep a sorted list of at most k nearest
-                        // neighbors.
-                        if (distance2 <= it->second) {
-                            it = nearestNodesWithSquaredDistances.insert(it, std::make_pair(neighborId, distance2));
-                            bInserted = true;
-                            break;
-                        }
-                    }
+            // Compute skinning weights.
+            float weight_sum{ 0.f };
+            for (int i = 0; i < num_anchors; ++i) {
+                float geodesic_dist_to_node = dist_to_nearest_geodesic_nodes[i];
 
-                    if (!bInserted && nearestNodesWithSquaredDistances.size() < GRAPH_K) {
-                        nearestNodesWithSquaredDistances.emplace_back(std::make_pair(neighborId, distance2));
-                    }
+                float weight = compute_anchor_weight(geodesic_dist_to_node, node_coverage);
+                weight_sum += weight;
 
-                    // We keep only the list of k nearest elements.
-                    if (bInserted && nearestNodesWithSquaredDistances.size() > GRAPH_K) {
-                        nearestNodesWithSquaredDistances.pop_back();
-                    }
-                }
+                skinning_weights.push_back(weight);
+            }
 
-                // Compute skinning weights.
-                std::vector<int> nearestGeodesicNodeIds;
-                nearestGeodesicNodeIds.reserve(nearestNodesWithSquaredDistances.size());
-
-                std::vector<float> skinningWeights;
-                skinningWeights.reserve(nearestNodesWithSquaredDistances.size());
-
-                float weightSum{ 0.f };
-                for (auto it = nearestNodesWithSquaredDistances.begin(); it != nearestNodesWithSquaredDistances.end(); ++it) {
-                    int nodeId = it->first;
-
-                    Eigen::Vector3f nodePos(*graphNodes.data(nodeId, 0), *graphNodes.data(nodeId, 1), *graphNodes.data(nodeId, 2));
-                    float weight = computeAnchorWeight(pixelPos, nodePos, nodeCoverage);
-                    weightSum += weight;
-
-                    nearestGeodesicNodeIds.push_back(nodeId);
-                    skinningWeights.push_back(weight);
-                }
-
-                // Normalize the skinning weights.
-                int nAnchors = nearestGeodesicNodeIds.size();
-
-                if (weightSum > 0) {
-                    for (int i = 0; i < nAnchors; i++)	skinningWeights[i] /= weightSum;
-                }
-                else if (nAnchors > 0) {
-                    for (int i = 0; i < nAnchors; i++)	skinningWeights[i] = 1.f / nAnchors;
-                }
-                
-                // Store the results.
-                for (int i = 0; i < nAnchors; i++) {
-                    *pixelAnchors.mutable_data(y, x, i) = nearestGeodesicNodeIds[i];
-                    *pixelWeights.mutable_data(y, x, i) = skinningWeights[i];
-                }
+            // Normalize the skinning weights.
+            if (weight_sum > 0) {
+                for (int i = 0; i < num_anchors; i++)
+                    skinning_weights[i] /= weight_sum;
+            }
+            else if (num_anchors > 0) {
+                for (int i = 0; i < num_anchors; i++)
+                    skinning_weights[i] = 1.f / num_anchors;
+            }
+            
+            // Store the results.
+            for (int i = 0; i < num_anchors; i++) {
+                *pixel_anchors.mutable_data(v, u, i) = nearest_geodesic_node_ids[i];
+                *pixel_weights.mutable_data(v, u, i) = skinning_weights[i];
             }
         }
     }
@@ -557,7 +681,7 @@ namespace graph_proc {
                     int nodeId = it->first;
 
                     Eigen::Vector3f nodePos(*graphNodes.data(nodeId, 0), *graphNodes.data(nodeId, 1), *graphNodes.data(nodeId, 2));
-                    float weight = computeAnchorWeight(pixelPos, nodePos, nodeCoverage);
+                    float weight = compute_anchor_weight(pixelPos, nodePos, nodeCoverage);
                     weightSum += weight;
 
                     nearestEuclideanNodeIds.push_back(nodeId);
@@ -802,6 +926,34 @@ namespace graph_proc {
                 *pixelWeights.mutable_data(y, x, 2) = w10;
                 *pixelAnchors.mutable_data(y, x, 3) = validNode11;
                 *pixelWeights.mutable_data(y, x, 3) = w11;
+            }
+        }
+    }
+
+    void update_pixel_anchors(
+        const std::map<int, int>& node_id_mapping,
+        py::array_t<int>& pixel_anchors
+    ) {
+        int height      = pixel_anchors.shape(0);
+        int width       = pixel_anchors.shape(1);
+        int num_anchors = pixel_anchors.shape(2);
+
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+
+                for (int a = 0; a < num_anchors; a++) {
+
+                    int current_anchor_id = *pixel_anchors.data(y, x, a);
+                    
+                    if (current_anchor_id != -1) {
+                        int mapped_anchor_id = node_id_mapping.at(current_anchor_id);
+
+                        // update anchor only if it would actually change something
+                        if (mapped_anchor_id != current_anchor_id) {
+                            *pixel_anchors.mutable_data(y, x, a) = mapped_anchor_id;
+                        }
+                    }
+                }
             }
         }
     }
