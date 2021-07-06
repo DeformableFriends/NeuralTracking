@@ -67,7 +67,7 @@ If you just want to get a feeling of the whole approach at inference time, you c
 python example_viz.py
 ```
 
-to run inference on a couple of source and target frames that you can already find at [example_data](example_data). For this, you'll be using a model checkpoint that we lso provide at [checkpoints](checkpoints).
+to run inference on a couple of source and target frames that you can already find at [example_data](example_data). For this, you'll be using a model checkpoint that we also provide at [checkpoints](checkpoints).
 
 Within the [Open3D](http://www.open3d.org/) viewer, you can view the following by pressing these keys:
 
